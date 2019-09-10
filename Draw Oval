@@ -1,0 +1,271 @@
+import ij.*;
+import ij.plugin.filter.PlugInFilter;
+import ij.process.*;
+import ij.gui.*;
+import ij.io.SaveDialog;
+import java.awt.*;
+import java.awt.event.*;
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.DataInput;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.util.*;
+import javax.swing.JPanel;
+import javax.swing.DefaultListModel;
+import javax.swing.JList;
+import java.util.UUID;
+
+public class Draw_Oval extends JPanel implements DialogListener, PlugInFilter, MouseListener, MouseMotionListener, ActionListener {
+	ImagePlus img;
+	ImageCanvas canvas;
+	static Vector images = new Vector();
+	ImageProcessor ip;
+	Rectangle box = new Rectangle();
+	boolean move = false; 
+	private Panel panel;	
+	private Button moreButton, colorButton;
+	static final long serialVersionUID = 1L;
+	private String coord;
+	private String randomUUIDString;
+	private String label;
+	private static ArrayList<Oval_Info> oval_info = new ArrayList();
+	
+	public int setup(String arg, ImagePlus img) {
+		this.img = img;
+		IJ.register(Draw_Rectangle.class);
+		return DOES_ALL+NO_CHANGES;
+	}
+
+	public void run(ImageProcessor ip) {
+		this.ip = ip;
+		Integer id = new Integer(img.getID());
+		if (images.contains(id)) {
+			IJ.log("Already listening to this image");
+			return;
+		}
+		else {
+			ImageWindow win = img.getWindow();
+			canvas = win.getCanvas();
+			canvas.addMouseListener(this);
+			canvas.addMouseMotionListener(this);
+		}
+
+		img = IJ.getImage();
+		Overlay overlay = img.getOverlay();
+		if (overlay==null)
+			overlay = new Overlay();
+		Roi roi = img.getRoi();
+		if (roi!=null)
+			overlay.add(roi);
+		if (overlay.size()==0) {
+			return;
+		}
+
+		Rectangle box = roi.getBounds();
+	}
+	
+	
+	public OvalRoi drawCircle(int x, int y, int rad) {
+		Rectangle rect = ip.getRoi();
+		OvalRoi roi = new OvalRoi(x-rad+rect.x, y-rad+rect.y, 2*rad, 2*rad);
+		img.setRoi(roi);
+		return roi;
+	}
+
+	public void mousePressed(MouseEvent e) {
+		int x = e.getX();
+		int y = e.getY();
+		int offscreenX = canvas.offScreenX(x);
+		int offscreenY = canvas.offScreenY(y);
+
+		if (!move) {
+			box.x = offscreenX;
+			box.y = offscreenY;
+			box.width = 0;
+			box.height = 0;
+		}
+	}
+	
+	public void updateArrayList() {
+		
+	}
+
+	public void mouseReleased(MouseEvent e) {
+		if (move) {
+			return;
+		}
+
+		int x = e.getX();
+		int y = e.getY();
+		int offscreenX = canvas.offScreenX(x);
+		int offscreenY = canvas.offScreenY(y);
+
+		int centX = (box.x+offscreenX)/2;
+		int centY = (box.y+offscreenY)/2;
+		int rad = (int) (Math.sqrt(Math.pow(box.x-offscreenX, 2) + Math.pow(box.y-offscreenY, 2))/2);
+
+		OvalRoi ovalroi = drawCircle(centX, centY, rad);
+		
+		coord = (box.x+offscreenX)/2 + " " + (box.y+offscreenY)/2 + " " + rad + " " + rad;
+		move = true;
+		IJ.log("mouseReleased: " + (box.x+offscreenX)/2 + " " + (box.y+offscreenY)/2 + " " + rad + " " + rad);
+		generateUUID();
+		label();
+
+	}
+	
+	public void generateUUID() {
+		// Creating a random UUID (Universally unique identifier).
+        UUID uuid = UUID.randomUUID();
+        randomUUIDString = uuid.toString();
+		//randomUUIDString_array.add(randomUUIDString);
+        IJ.log("Random UUID String = " + randomUUIDString);
+        IJ.log("UUID version = " + uuid.version());
+        IJ.log("UUID variant = " + uuid.variant());
+	}
+	
+	public void label() {
+		ImagePlus img = IJ.getImage();
+		Roi roi = img.getRoi();
+		
+		int index;
+		String[] labels = {"Parent Cell", "Budding Cell", "Pillar", "Trap"};
+		GenericDialog gd = new GenericDialog("Label Image");		
+		
+		gd.addChoice("Roi Label", labels, "Parent Cell");
+		gd.showDialog();
+
+		if (gd.wasCanceled())
+			return;
+		
+		index = (int)gd.getNextChoiceIndex();
+		
+		if (roi!=null) {
+			IJ.log("Original name: " + roi.getName());
+			roi.setName(labels[index]);
+			label = roi.getName();
+			IJ.log("New name: " + roi.getName());
+			
+			Oval_Info oi = new Oval_Info(coord, label, randomUUIDString);
+			oval_info.add(oi);
+
+			for(int i=0;i<oval_info.size();i++){
+			    IJ.log("Coord:" + oval_info.get(i).getCoord());
+			    IJ.log("UUID: " + oval_info.get(i).getUUID());
+			    IJ.log("Label: " + oval_info.get(i).getLabel());
+			} 
+			
+			menu();
+			}
+	}
+	
+	public void menu() {
+		int index;
+		GenericDialog gd = new GenericDialog("Toolbar");
+		panel = new Panel();
+		panel.setLayout(new GridLayout(5, 2));
+		addButton("Save");
+
+		//addButton("Add ROI");
+		//addButton("Delete");
+		//addButton("Clear");
+
+		gd.addPanel(panel, GridBagConstraints.EAST, new Insets(5, 0, 0, 0));
+		gd.showDialog();
+		
+		if (gd.wasCanceled())
+			return;
+		index = (int)gd.getNextChoiceIndex();
+
+	}
+
+	public void writeTextFile(String fileName) throws IOException{
+		PrintWriter pw = new PrintWriter(new BufferedWriter(new FileWriter(fileName)));
+		IJ.log(oval_info.size() + " ");
+		pw.println("Coordinates				UUID			Type");
+		for (int i = 0; i < oval_info.size(); i++) {
+			pw.println(oval_info.get(i).getCoord() + "	" + oval_info.get(i).getUUID() + "	" + oval_info.get(i).getLabel());
+		}
+		pw.close();
+	}
+	
+	public void mouseDragged(MouseEvent e) {
+
+	}
+	
+	public void addButton(String label) {
+		Button b = new Button(label);
+		b.addActionListener(this);
+		panel.add(b);
+	}
+
+	public static String modifiers(int flags) {
+		String s = " [ ";
+		if (flags == 0) return "";
+		if ((flags & Event.SHIFT_MASK) != 0) 
+			s += "Shift ";
+		if ((flags & Event.CTRL_MASK) != 0) 
+			s += "Control ";
+		if ((flags & Event.META_MASK) != 0) 
+			s += "Meta (right button) ";
+		if ((flags & Event.ALT_MASK) != 0) 
+			s += "Alt ";
+		s += "]";
+		if (s.equals(" [ ]"))
+			s = " [no modifiers]";
+		return s;
+	}
+
+	public void mouseExited(MouseEvent e) {}
+	public void mouseClicked(MouseEvent e) {}
+	public void mouseEntered(MouseEvent e) {}
+	public void mouseMoved(MouseEvent e) {}
+
+	@Override
+	public void actionPerformed(ActionEvent e) {
+		String label = e.getActionCommand();
+		if (label==null)
+			return;
+		String command = label;
+		
+		if (command.equals("Save")) {
+			IJ.log("Save");
+			
+			SaveDialog sd = new SaveDialog("Save Textfile ...", "image",".txt");
+			String directory = sd.getDirectory();
+			String fileName = sd.getFileName();
+			String path = directory + fileName;
+			
+			if (fileName==null) 
+				return;
+			
+			IJ.log("Saving: " + path);
+			this.ip = ip;
+			IJ.log("Saving to file");
+			
+			try {
+				writeTextFile(path);
+			} catch (IOException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
+			
+			IJ.log("Finished saving");
+		}
+			
+	}
+
+	@Override
+	public boolean dialogItemChanged(GenericDialog arg0, AWTEvent arg1) {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+}
