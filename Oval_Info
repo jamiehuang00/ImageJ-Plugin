@@ -1,0 +1,27 @@
+import ij.gui.OvalRoi;
+
+public class Oval_Info {
+	
+	private String coord;
+	private String label;
+	private String uuid;
+	
+	public Oval_Info(String coord, String label, String uuid) {
+		this.coord = coord;
+		this.label = label;
+		this.uuid = uuid;
+	}
+	
+	public String getCoord() {
+		return coord;
+	}
+	
+	public String getLabel() {
+		return label;
+	}
+	
+	public String getUUID() {
+		return uuid;
+	}
+
+}
